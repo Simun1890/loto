@@ -56,6 +56,20 @@ function ensureAuthenticated(req, res, next) {
     res.redirect("/login");
 }
 
+app.get("/", async (req, res) => {
+    const round = await getActiveRound();
+    const ticketsCount = round ? await countTickets(round.id) : 0;
+
+    res.send(`
+      <h1>Welcome!</h1>
+      <p>Active: ${round ? round.active : "No"}</p>
+      <p>Tickets: ${ticketsCount}</p>
+      <p>Numbers: ${round && round.numbers ? round.numbers : "N/A"}</p>
+      <p>User: ${req.user ? req.user.displayName : "Not logged in"}</p>
+      <p>Can submit ticket: ${round ? round.active : false}</p>
+    `);
+});
+
 // ---------------------
 // Auth0 rute
 // ---------------------
@@ -73,40 +87,6 @@ app.get("/logout", (req, res) => {
     });
 });
 
-// ---------------------
-// Početna ruta
-// ---------------------
-app.get("/", async (req, res) => {
-    try {
-        const round = await getActiveRound();
-
-        if (!round) {
-            // Nema aktivnog kola
-            return res.json({
-                active: false,
-                tickets: 0,
-                numbers: null,
-                user: req.user || null,
-                message: "Nema aktivnog kola."
-            });
-        }
-
-        // Dohvati broj listića za trenutno kolo
-        const ticketsCount = await countTickets(round.id);
-
-        res.json({
-            active: round.active,
-            tickets: ticketsCount,
-            numbers: round.numbers ? round.numbers.split(",").map(Number) : null,
-            user: req.user || null,
-            canSubmit: round.active // true ako je kolo aktivno
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Greška na serveru." });
-    }
-});
 
 // ---------------------
 // Korisničke rute
