@@ -1,0 +1,4 @@
+.loto-backend/
+.vs/
+node_modules/
+.env
