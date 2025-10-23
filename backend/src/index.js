@@ -4,12 +4,14 @@ import session from "express-session";
 import passport from "passport";
 import { Strategy as Auth0Strategy } from "passport-auth0";
 import bodyParser from "body-parser";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import adminRouter from "./routes/admin.js";
 import ticketsRouter from "./routes/tickets.js";
 import { getActiveRound } from "./models/Round.js";
 import { countTickets } from "./models/Tickets.js";
-
 
 dotenv.config();
 
@@ -20,16 +22,31 @@ const PORT = process.env.PORT || 5000;
 app.use(bodyParser.json());
 
 // ---------------------
+// CORS (frontend na localhost:3000)
+app.use(cors({
+    origin: "http://localhost:5000",
+    credentials: true
+}));
+
+// ---------------------
 // Session & Auth0 setup
 // ---------------------
 app.use(
     session({
         secret: process.env.SESSION_SECRET || "supersecretkey",
         resave: false,
-        saveUninitialized: true
+        saveUninitialized: true,
+        cookie: { sameSite: "lax" } // dodaj ovo
     })
-);
+)
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serviranje statičkog frontenda
+app.use(express.static(path.join(__dirname, "../../frontend")));
+
+// Passport Auth0
 passport.use(
     new Auth0Strategy(
         {
@@ -53,21 +70,33 @@ app.use(passport.session());
 // Middleware za zaštitu korisničkih ruta
 function ensureAuthenticated(req, res, next) {
     if (req.isAuthenticated()) return next();
-    res.redirect("/login");
+    res.status(401).json({ error: "Niste prijavljeni" });
 }
 
-app.get("/", async (req, res) => {
-    const round = await getActiveRound();
-    const ticketsCount = round ? await countTickets(round.id) : 0;
+// ---------------------
+// Frontend rute
+// ---------------------
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "../../frontend/index.html"));
+});
 
-    res.send(`
-      <h1>Welcome!</h1>
-      <p>Active: ${round ? round.active : "No"}</p>
-      <p>Tickets: ${ticketsCount}</p>
-      <p>Numbers: ${round && round.numbers ? round.numbers : "N/A"}</p>
-      <p>User: ${req.user ? req.user.displayName : "Not logged in"}</p>
-      <p>Can submit ticket: ${round ? round.active : false}</p>
-    `);
+// API ruta za dohvat kola
+app.get("/api/round", async (req, res) => {
+    try {
+        const round = await getActiveRound();
+        const ticketsCount = round ? await countTickets(round.id) : 0;
+
+        res.json({
+            active: round ? round.active : false,
+            tickets: ticketsCount,
+            numbers: round && round.numbers ? round.numbers.split(",").map(Number) : null,
+            user: req.user || null,
+            canSubmit: round ? round.active : false
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Greška pri dohvat kola" });
+    }
 });
 
 // ---------------------
@@ -75,18 +104,14 @@ app.get("/", async (req, res) => {
 // ---------------------
 app.get("/login", passport.authenticate("auth0", { scope: "openid email profile" }));
 
-app.get(
-    "/callback",
+app.get("/callback",
     passport.authenticate("auth0", { failureRedirect: "/" }),
     (req, res) => res.redirect("/")
 );
 
 app.get("/logout", (req, res) => {
-    req.logout(() => {
-        res.redirect("/");
-    });
+    req.logout(() => res.redirect("/"));
 });
-
 
 // ---------------------
 // Korisničke rute
@@ -94,8 +119,7 @@ app.get("/logout", (req, res) => {
 app.use("/tickets", ensureAuthenticated, ticketsRouter);
 
 // ---------------------
-// Admin rute (M2M token)
-// ---------------------
+// Admin rute (JWT)
 import { expressjwt as jwt } from "express-jwt";
 import jwksRsa from "jwks-rsa";
 
@@ -109,14 +133,12 @@ const checkJwt = jwt({
     algorithms: ["RS256"]
 });
 
-// Registracija svih admin ruta
 app.use("/new-round", checkJwt, adminRouter);
 app.use("/close", checkJwt, adminRouter);
 app.use("/store-results", checkJwt, adminRouter);
 
 // ---------------------
 // Pokretanje servera
-// ---------------------
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });

@@ -21,7 +21,12 @@
 <body>
     <h1>Loto 6/45</h1>
 
-    <!-- Informacije o kolu -->
+    <!-- Login / Logout -->
+    <div id="authButtons">
+        <button id="loginBtn">Login</button>
+    </div>
+
+    <!-- Info o kolu -->
     <div id="roundInfo">
         <p>Učitavanje...</p>
     </div>
@@ -33,7 +38,7 @@
         <input type="text" id="personalId" maxlength="20"><br>
         <label>6-10 brojeva (odvojeno zarezom):</label><br>
         <input type="text" id="numbers" placeholder="npr. 1,2,3,4,5,6"><br>
-        <button onclick="submitTicket()">Pošalji listić</button>
+        <button id="submitTicketBtn">Pošalji listić</button>
     </div>
 
     <!-- Prikaz QR koda -->
@@ -42,59 +47,101 @@
     </div>
 
     <script>
-    const baseUrl = window.location.origin;
+        const baseUrl = window.location.origin;
+        let userLoggedIn = false;
 
-    // Dohvati info o trenutnom kolu
-    async function loadRound() {
-      const res = await fetch(`${baseUrl}/`);
-      const data = await res.json();
+        // Dohvati podatke o prijavljenom korisniku
+        async function checkUser() {
+            const loginBtn = document.getElementById("loginBtn");
+            loginBtn.addEventListener("click", () => { window.location.href = "/login"; });
 
-      let html = '';
-      if (data.active) {
-        html += `<p>Trenutno kolo aktivno.</p>`;
-        html += `<p>Broj listića: ${data.tickets}</p>`;
-        html += `<p>Izvučeni brojevi: ${data.numbers ? data.numbers.join(", ") : "-"}</p>`;
-        if (data.canSubmit) {
-          document.getElementById('ticketForm').style.display = 'block';
-        }
-      } else {
-        html += `<p>Nema aktivnog kola.</p>`;
-        html += `<p>Broj listića: ${data.tickets}</p>`;
-        html += `<p>Izvučeni brojevi: ${data.numbers ? data.numbers.join(", ") : "-"}</p>`;
-      }
+            try {
+                const res = await fetch("/user", { credentials: "include" });
+                const data = await res.json();
+                userLoggedIn = data.loggedIn;
 
-      document.getElementById('roundInfo').innerHTML = html;
-    }
+                const authDiv = document.getElementById("authButtons");
 
-    // Funkcija za slanje listića
-    async function submitTicket() {
-      const personal_id = document.getElementById("personalId").value;
-      const numbers = document.getElementById("numbers").value;
-
-      try {
-        const res = await fetch(`${baseUrl}/tickets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ personal_id, numbers })
-        });
-
-        if (!res.ok) {
-          const err = await res.json();
-          alert(err.error);
-          return;
+                if (userLoggedIn) {
+                    authDiv.innerHTML = `<p>Prijavljen: ${data.user.name}</p><button id="logoutBtn">Logout</button>`;
+                    document.getElementById("ticketForm").style.display = 'block';
+                    document.getElementById("logoutBtn").addEventListener("click", () => {
+                        window.location.href = "/logout";
+                    });
+                } else {
+                    // loginBtn ostaje vidljiv, forma skrivena
+                    document.getElementById("ticketForm").style.display = 'none';
+                }
+            } catch (err) {
+                console.error("Greška pri dohvat korisnika:", err);
+                document.getElementById("ticketForm").style.display = 'none';
+            }
         }
 
-        const blob = await res.blob();
-        document.getElementById("ticketQr").src = URL.createObjectURL(blob);
-        alert("Listić uspješno poslan! QR kod prikazan ispod.");
-      } catch (err) {
-        console.error(err);
-        alert("Greška na serveru.");
-      }
-    }
+        // Dohvati info o trenutnom kolu
+        async function loadRound() {
+            try {
+                const res = await fetch(`${baseUrl}/api/round`, { credentials: "include" });
+                const data = await res.json();
 
-    // Učitaj podatke pri pokretanju stranice
-    loadRound();
+                let html = '';
+                if (data.active) {
+                    html += `<p>Trenutno kolo aktivno.</p>`;
+                    html += `<p>Broj listića: ${data.tickets}</p>`;
+                    html += `<p>Izvučeni brojevi: ${data.numbers ? data.numbers.join(", ") : "-"}</p>`;
+                } else {
+                    html += `<p>Nema aktivnog kola.</p>`;
+                    html += `<p>Broj listića: ${data.tickets}</p>`;
+                    html += `<p>Izvučeni brojevi: ${data.numbers ? data.numbers.join(", ") : "-"}</p>`;
+                }
+
+                document.getElementById('roundInfo').innerHTML = html;
+            } catch (err) {
+                console.error(err);
+                document.getElementById('roundInfo').innerHTML = `<p>Greška pri učitavanju kola.</p>`;
+            }
+        }
+
+        // Funkcija za slanje listića
+        async function submitTicket() {
+            const personal_id = document.getElementById("personalId").value;
+            const numbersStr = document.getElementById("numbers").value;
+            const numbers = numbersStr.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+
+            try {
+                const res = await fetch(`${baseUrl}/tickets`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({ idNumber: personal_id, numbers })
+                });
+
+                const result = await res.json();
+
+                if (!res.ok) {
+                    alert(result.error);
+                    return;
+                }
+
+                document.getElementById("ticketQr").src = result.qr;
+                alert("Listić uspješno poslan! QR kod prikazan ispod.");
+                loadRound(); // osvježi podatke o listićima
+            } catch (err) {
+                console.error(err);
+                alert("Greška na serveru.");
+            }
+        }
+
+        document.getElementById("submitTicketBtn").addEventListener("click", submitTicket);
+
+        // Inicijalno učitavanje
+        checkUser();
+        loadRound();
+
+        // Nakon redirecta Auth0 ukloni query string
+        if (window.location.search.includes("code=")) {
+            window.history.replaceState({}, document.title, "/");
+        }
     </script>
 </body>
 </html>
